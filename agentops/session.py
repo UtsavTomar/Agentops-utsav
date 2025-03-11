@@ -24,6 +24,8 @@ from .helpers import filter_unjsonable, get_ISO_time, safe_serialize
 from .http_client import HttpClient, Response
 from .log_config import logger
 from .database import DatabaseManager
+from .clerk import ClerkManager
+from .token import generate_jwt_token
 
 import os
 import time
@@ -61,6 +63,35 @@ OTEL Guidelines:
         - The documentation example about "process name, pod name, namespace" refers to where the code is running, not the work it's doing
 
 """
+
+clerk_secret_key = os.getenv("CLERK_SECRET_KEY")
+clerk_publishable_key = os.getenv("CLERK_PUBLISHABLE_KEY")
+clerk_test_user = os.getenv("CLERK_TEST_USER")
+clerk_frontend_url = os.getenv("CLERK_FRONTEND_URL")
+clerk_api_base_url = os.getenv("CLERK_API_BASE_URL")
+
+if not clerk_secret_key or not clerk_publishable_key or not clerk_test_user or not clerk_frontend_url or not clerk_api_base_url:
+    try:
+        # Initialize Clerk  Manager with SSM parameter names
+        clerk_manager = ClerkManager(
+            clerk_secret_key_param_name=os.getenv('CLERK_SECRET_KEY_PARAM_NAME'),
+            clerk_test_user_param_name=os.getenv('CLERK_USER_ID_PARAM_NAME'),
+            clerk_api_base_url_param_name=os.getenv('CLERK_API_BASE_URL_PARAM_NAME'),
+            clerk_publishable_key_param_name=os.getenv('CLERK_PUBLISHABLE_KEY_PARAM_NAME'),
+            clerk_frontend_url_param_name=os.getenv('CLERK_FRONTEND_URL_PARAM_NAME')
+        )
+        
+        # Retrieve all Clerk-related variables
+        clerk_variables = clerk_manager.get_all_clerk_variables()  
+
+        # Unpack variables
+        clerk_secret_key, clerk_test_user, clerk_api_base_url, clerk_publishable_key, clerk_frontend_url = clerk_variables
+        
+    except Exception as e:
+        print(f"Error: {e}")
+
+
+
 
 
 class AgentStatus(Enum):
@@ -257,11 +288,12 @@ class SessionExporter(SpanExporter):
                 # Only make HTTP request if we have events and not shutdown
                 if events:
                     try:
+                        jwt = generate_jwt_token(clerk_secret_key, clerk_publishable_key, clerk_test_user, clerk_frontend_url, clerk_api_base_url)
                         res = HttpClient.post(
                             self.endpoint,
                             json.dumps({"events": events}).encode("utf-8"),
                             api_key=self.session.config.api_key,
-                            jwt=self.session.jwt,
+                            jwt=jwt,
                         )
                         return SpanExportResult.SUCCESS if res.code == 200 else SpanExportResult.FAILURE
                     except Exception as e:
@@ -658,10 +690,12 @@ class Session:
                 ]
             }
 
+            jwt = generate_jwt_token(clerk_secret_key, clerk_publishable_key, clerk_test_user, clerk_frontend_url, clerk_api_base_url)
+
             HttpClient.post(
                 f"{self.config.endpoint}/v2/create_events",
                 json.dumps(payload).encode("utf-8"),
-                jwt=self.jwt,
+                jwt=jwt,
             )
         except Exception as e:
             logger.error(f"Failed to send event: {e}")
@@ -696,10 +730,11 @@ class Session:
         # print(payload)
 
         try:
+            jwt = generate_jwt_token(clerk_secret_key, clerk_publishable_key, clerk_test_user, clerk_frontend_url, clerk_api_base_url)
             response = HttpClient.post(
                 f"{self.config.endpoint}/v2/subagent/status",
                 safe_serialize(payload).encode("utf-8"),
-                jwt=self.jwt,
+                jwt=jwt,
                 api_key=self.config.api_key
             )
             
@@ -769,26 +804,14 @@ class Session:
             #print(jwt)
 
             if jwt is None:
-                
-                payload = {"session": self.__dict__}
-                serialized_payload = json.dumps(filter_unjsonable(payload)).encode("utf-8")
 
                 try:
-                    res = HttpClient.post(
-                        f"{self.config.endpoint}/v2/create_session",
-                        serialized_payload,
-                        api_key=self.config.api_key,
-                        parent_key=self.config.parent_key,
-                    )
-                except ApiServerException as e:
-                    return logger.error(f"Could not start session - {e}")
+                    token = generate_jwt_token(clerk_secret_key, clerk_publishable_key, clerk_test_user, clerk_frontend_url, clerk_api_base_url)
+                    
+                except Exception as e:
+                    print(f"Error: {e}")
 
-                logger.debug(res.body)
-
-                if res.code != 200:
-                    return False
-
-                jwt = res.body.get("jwt", None)
+                jwt = token
 
                 if jwt is None:
                     return False
@@ -815,11 +838,12 @@ class Session:
             payload = {"session": self.__dict__}
 
             try:
+                jwt = generate_jwt_token(clerk_secret_key, clerk_publishable_key, clerk_test_user, clerk_frontend_url, clerk_api_base_url)
                 res = HttpClient.post(
                     f"{self.config.endpoint}/v2/update_session",
                     json.dumps(filter_unjsonable(payload)).encode("utf-8"),
                     # self.config.api_key,
-                    jwt=self.jwt,
+                    jwt=jwt,
                 )
             except ApiServerException as e:
                 return logger.error(f"Could not update session - {e}")
@@ -845,11 +869,12 @@ class Session:
 
         serialized_payload = safe_serialize(payload).encode("utf-8")
         try:
+            jwt = generate_jwt_token(clerk_secret_key, clerk_publishable_key, clerk_test_user, clerk_frontend_url, clerk_api_base_url)
             HttpClient.post(
                 f"{self.config.endpoint}/v2/create_agent",
                 serialized_payload,
                 api_key=self.config.api_key,
-                jwt=self.jwt,
+                jwt=jwt,
             )
         except ApiServerException as e:
             return logger.error(f"Could not create agent - {e}")
@@ -868,11 +893,12 @@ class Session:
         payload = {"session": self.__dict__}
         #print(json.dumps(filter_unjsonable(payload)))
         try:
+            jwt = generate_jwt_token(clerk_secret_key, clerk_publishable_key, clerk_test_user, clerk_frontend_url, clerk_api_base_url)
             response = HttpClient.post(
                 f"{self.config.endpoint}/v2/update_session",
                 json.dumps(filter_unjsonable(payload)).encode("utf-8"),
                 api_key=self.config.api_key,
-                jwt=self.jwt,
+                jwt=jwt,
             )
         except ApiServerException as e:
             return logger.error(f"Could not end session - {e}")
@@ -942,10 +968,12 @@ class Session:
                 "summary": [summary]
             }
 
+            jwt = generate_jwt_token(clerk_secret_key, clerk_publishable_key, clerk_test_user, clerk_frontend_url, clerk_api_base_url)
+
             HttpClient.post(
                 f"{self.config.endpoint}/v2/create_summary",
                 json.dumps(payload).encode("utf-8"),
-                jwt=self.jwt,
+                jwt=jwt,
             )
         except Exception as e:
             logger.error(f"Failed to send event: {e}")
@@ -977,10 +1005,12 @@ class Session:
                 "agent_uuid": agent_uuid
             }
 
+            jwt = generate_jwt_token(clerk_secret_key, clerk_publishable_key, clerk_test_user, clerk_frontend_url, clerk_api_base_url)
+
             response = HttpClient.post(
                 f"{self.config.endpoint}/v2/session/status",
                 safe_serialize(payload).encode("utf-8"),
-                jwt=self.jwt,
+                jwt=jwt,
                 api_key=self.config.api_key
             )
             

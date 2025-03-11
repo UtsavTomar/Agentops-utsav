@@ -347,7 +347,6 @@ def track_agent(name: Union[str, None] = None):
                             cursor.execute(query, (agent_uuid, self.agentops_agent_name))
                             
                             result = cursor.fetchone()
-                            print(result,"----------------------------------------")
                             
                             if result:
                                 return result[0]  # Return the subagent_id from database

@@ -23,7 +23,6 @@ class DatabaseManager():
             cursor.execute(query, (session_id,))
             
             result = cursor.fetchone()
-            print(result, "----------------------------------------")
             
             if result:
                 agent_uuid = result[0]

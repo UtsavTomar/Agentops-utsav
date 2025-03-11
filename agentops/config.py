@@ -1,14 +1,35 @@
 from typing import List, Optional
 from uuid import UUID
+import boto3
+import os
 
 from .log_config import logger
+
+
+
+def get_api_endpoint():
+
+    try:
+        ssm_client = boto3.client('ssm')
+        response = ssm_client.get_parameter(
+            Name=os.getenv("API_URL_PARAM"),
+            WithDecryption=True
+        )
+        return response['Parameter']['Value']
+    except Exception as e:
+        raise Exception(f"Failed to get Api URL from SSM: {str(e)}")
+    
+endpoint = os.getenv("API_ENDPOINT")
+
+if endpoint is None:
+    endpoint = get_api_endpoint()
 
 
 class Configuration:
     def __init__(self):
         self.api_key: Optional[str] = None
         self.parent_key: Optional[str] = None
-        self.endpoint: str = "https://agentopenairegistryai.vercel.app"
+        self.endpoint: str = endpoint
         self.max_wait_time: int = 5000
         self.max_queue_size: int = 512
         self.default_tags: set[str] = set()
